@@ -37,6 +37,12 @@ export async function signInAction(_prev: AuthFormState, formData: FormData): Pr
 }
 
 export async function signUpAction(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
+  // A Server Action is reachable by direct POST, so hiding the form is not enough. Registration
+  // is opt-in via ALLOW_SIGNUP and refused here as well.
+  if (process.env.ALLOW_SIGNUP !== 'true') {
+    return { error: 'Registration is closed on this deployment.', message: null };
+  }
+
   if (!isAuthConfigured()) {
     return { error: 'Authentication is not configured on this deployment.', message: null };
   }

@@ -1,82 +1,15 @@
-'use client';
+import { SignInForm, SignUpForm } from './forms';
 
-import { useActionState } from 'react';
-import { signInAction, signUpAction, type AuthFormState } from './actions';
+export const dynamic = 'force-dynamic';
 
-const INITIAL: AuthFormState = { error: null, message: null };
-
-const fieldClass =
-  'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-base text-zinc-900 shadow-sm outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-zinc-300';
-
-function AuthForm({ mode }: { mode: 'signin' | 'signup' }) {
-  const action = mode === 'signin' ? signInAction : signUpAction;
-  const [state, formAction, pending] = useActionState(action, INITIAL);
-  const isSignUp = mode === 'signup';
-
-  return (
-    <form action={formAction} className="space-y-4">
-      {isSignUp ? (
-        <div>
-          <label htmlFor="name" className="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Name
-          </label>
-          <input id="name" name="name" type="text" autoComplete="name" className={fieldClass} placeholder="Your name" />
-        </div>
-      ) : null}
-
-      <div>
-        <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Email
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          required
-          autoComplete="email"
-          inputMode="email"
-          className={fieldClass}
-          placeholder="you@example.com"
-        />
-      </div>
-
-      <div>
-        <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Password
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          required
-          minLength={isSignUp ? 8 : undefined}
-          autoComplete={isSignUp ? 'new-password' : 'current-password'}
-          className={fieldClass}
-          placeholder={isSignUp ? 'At least 8 characters' : ''}
-        />
-      </div>
-
-      {state.error ? (
-        <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          {state.error}
-        </p>
-      ) : null}
-      {state.message ? (
-        <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-          {state.message}
-        </p>
-      ) : null}
-
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-700 disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-      >
-        {pending ? 'Working…' : isSignUp ? 'Create account' : 'Sign in'}
-      </button>
-    </form>
-  );
-}
+/**
+ * Registration is closed by default. This deployment is for a single user, so the signup form
+ * is not rendered and `signUpAction` refuses regardless of how it is called.
+ *
+ * Set ALLOW_SIGNUP=true in the Vercel environment to reopen registration later without a
+ * code change.
+ */
+const ALLOW_SIGNUP = process.env.ALLOW_SIGNUP === 'true';
 
 export default function LoginPage() {
   return (
@@ -88,17 +21,19 @@ export default function LoginPage() {
         </div>
 
         <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <AuthForm mode="signin" />
+          <SignInForm />
         </div>
 
-        <details className="mt-4 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <summary className="cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-300">
-            Need an account?
-          </summary>
-          <div className="mt-4">
-            <AuthForm mode="signup" />
-          </div>
-        </details>
+        {ALLOW_SIGNUP ? (
+          <details className="mt-4 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <summary className="cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-300">
+              Need an account?
+            </summary>
+            <div className="mt-4">
+              <SignUpForm />
+            </div>
+          </details>
+        ) : null}
       </div>
     </main>
   );
