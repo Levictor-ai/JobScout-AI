@@ -14,7 +14,7 @@ export async function GET(): Promise<Response> {
     bodies: {
       test: 'Send a connectivity test message.',
       digest: 'Send newly matched jobs above the match threshold. Pass { "dryRun": true } to preview. Needs Supabase and an OpenAI key.',
-      live: 'Fetch live boards, filter to target roles, and send. Needs neither Supabase nor an OpenAI key. Pass { "dryRun": true } to preview.',
+      live: 'Fetch live boards, filter to recent remote roles, and send. Needs neither Supabase nor an OpenAI key. Defaults: last 3 days, remote only, all role types. Pass { "dryRun": true } to preview.',
     },
   });
 }
@@ -30,7 +30,11 @@ export async function POST(request: Request): Promise<Response> {
     limit?: number;
     postedWithinDays?: number;
     maxCompanies?: number;
+    maxTotal?: number;
     includeAllRoles?: boolean;
+    requireRemote?: boolean;
+    allowHybrid?: boolean;
+    includeAggregators?: boolean;
   } = {};
 
   try {
@@ -57,9 +61,13 @@ export async function POST(request: Request): Promise<Response> {
     const report = await sendLiveDigest({
       dryRun: body.dryRun === true,
       limit: body.limit,
+      maxTotal: body.maxTotal,
       postedWithinDays: body.postedWithinDays,
       maxCompanies: body.maxCompanies,
-      includeAllRoles: body.includeAllRoles === true,
+      includeAllRoles: body.includeAllRoles,
+      requireRemote: body.requireRemote,
+      allowHybrid: body.allowHybrid,
+      includeAggregators: body.includeAggregators,
     });
     return Response.json(report, { status: report.ok ? 200 : 502 });
   }

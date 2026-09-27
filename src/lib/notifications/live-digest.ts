@@ -1,23 +1,23 @@
-import { runIngestion, type CollectedJob } from '@/lib/ingestion/run-ingestion';
+﻿import { runIngestion, type CollectedJob } from '@/lib/ingestion/run-ingestion';
 import { isTargetCandidate, withinDays } from '@/lib/ingestion/filter';
+import { describeRelevance, scoreRelevance } from '@/lib/matching/keyword-match';
+import { fetchRemoteBoards, type RemoteBoardJob } from '@/lib/sources/remote-boards';
 import { initialProfile } from '@/data/seed-data';
 import { sendTelegramMessage } from '@/lib/notifications/telegram';
 import { jobKey, readState, writeState, type DigestState } from '@/lib/notifications/live-state';
+import type { RemoteStatus } from '@/types';
 import type { RoleCategory } from '@/lib/sources/types';
 
 /**
  * Database-free digest.
  *
- * Fetches live Greenhouse and Ashby boards, keeps the roles worth seeing, drops anything
- * already sent, and pushes the rest to Telegram. Needs no Supabase and no OpenAI key, which
- * makes it the one path that works on a fresh checkout.
+ * Pulls live Greenhouse and Ashby boards plus five free remote-job aggregators, keeps what is
+ * remote and recently posted, drops anything already sent, and pushes the rest to Telegram.
+ * Needs no Supabase and no OpenAI key, which makes it the one path that works on a fresh
+ * checkout.
  *
- * Defaults are deliberately permissive: this is meant to be useful on day one, before a
- * profile is dialled in. Pass `includeAllRoles: false` to fall back to title/category
- * matching, and narrow `postedWithinDays` to only recent postings.
- *
- * There are no match scores here, so the message never claims a percentage. It reports the
- * signals that are genuinely known: title, board, location, and how fresh the posting is.
+ * There are no match scores here, so the message never claims a percentage. It reports what
+ * is actually known: title, company, location, and how fresh the posting is.
  */
 
 /** Telegram rejects `sendMessage` text past 4096 characters, so sends are chunked. */
@@ -30,6 +30,9 @@ export interface LiveDigestOptions {
   limit?: number;
   maxTotal?: number;
   includeAllRoles?: boolean;
+  requireRemote?: boolean;
+  allowHybrid?: boolean;
+  includeAggregators?: boolean;
   dryRun?: boolean;
   markSent?: boolean;
 }
@@ -38,19 +41,29 @@ export interface LiveDigestRow {
   title: string;
   company: string;
   location: string | null;
-  remoteStatus: string;
+  remoteStatus: RemoteStatus;
   employmentType: string;
   applicationUrl: string;
   postedAt: string | null;
+  source: string;
+  /** Keyword relevance 0-100 from the target profile. Not an AI score. */
+  relevance: number;
+  reasons: string[];
   matchedOn: string;
 }
 
 export interface LiveDigestResult {
   ok: boolean;
   mode: 'live';
+  postedWithinDays: number;
+  remoteOnly: boolean;
   boardsScanned: number;
   jobsFetched: number;
+  fromAggregators: number;
+  droppedNotRecent: number;
+  droppedNotRemote: number;
   matchedTargetRoles: number;
+  titleMatched: number;
   alreadySent: number;
   newRoles: number;
   heldBack: number;
@@ -60,6 +73,8 @@ export interface LiveDigestResult {
   dryRun: boolean;
   stateWritten: boolean;
   stateError?: string;
+  sourceCounts: Record<string, number>;
+  sourceFailures: Array<{ source: string; reason: string }>;
   messageIds: Array<number | null>;
   jobs: LiveDigestRow[];
   error?: string;
@@ -82,24 +97,17 @@ function relativeAge(isoDate: string | null): string {
 }
 
 function renderRow(row: LiveDigestRow): string {
+  const why = row.reasons.filter(Boolean).join(' Â· ');
+
   return [
     `<b>${escape(row.title)}</b>`,
-    `${escape(row.company)} · ${escape(row.location ?? 'Location not specified')} · ${relativeAge(row.postedAt)}`,
-    `<i>${escape(row.remoteStatus.replace('_', ' '))} · ${escape(row.employmentType.replace('_', ' '))}</i>`,
+    `${escape(row.company)} Â· ${escape(row.location ?? 'Location not specified')} Â· ${relativeAge(row.postedAt)}`,
+    `<i>${escape(row.employmentType.replace(/_/g, ' '))} Â· ${escape(why)} Â· via ${escape(row.source)}</i>`,
     `<a href="${escape(row.applicationUrl)}">View and apply</a>`,
   ].join('\n');
 }
 
-function header(count: number, scanned: number, part: number, parts: number): string {
-  const suffix = parts > 1 ? ` (part ${part}/${parts})` : '';
-  return [
-    '<b>JobScout AI</b>',
-    `${count} role${count === 1 ? '' : 's'} from ${scanned} live board${scanned === 1 ? '' : 's'}${suffix}.`,
-    '<i>Filtered on title and posting age. No AI scoring on this path.</i>',
-  ].join('\n');
-}
-
-function buildMessages(rows: LiveDigestRow[], scanned: number): string[] {
+function buildMessages(rows: LiveDigestRow[], scanned: number, days: number): string[] {
   const chunks: LiveDigestRow[][] = [];
   let current: LiveDigestRow[] = [];
 
@@ -113,23 +121,56 @@ function buildMessages(rows: LiveDigestRow[], scanned: number): string[] {
   if (current.length > 0) chunks.push(current);
 
   return chunks.map((chunk, index) => {
-    const body = chunk.map(renderRow).join('\n\n');
-    return `${header(chunk.length, scanned, index + 1, chunks.length)}\n\n${body}`;
+    const suffix = chunks.length > 1 ? ` (part ${index + 1}/${chunks.length})` : '';
+    const head = [
+      '<b>JobScout AI</b>',
+      `${chunk.length} new remote role${chunk.length === 1 ? '' : 's'} from the last ${days} day${days === 1 ? '' : 's'}${suffix}.`,
+      `<i>${scanned} boards scanned. Ordered by keyword match to your target profile, then newest. Not AI scored.</i>`,
+    ].join('\n');
+
+    return `${head}\n\n${chunk.map(renderRow).join('\n\n')}`;
   });
 }
 
+function toRow(job: RemoteBoardJob): LiveDigestRow {
+  const relevance = scoreRelevance(job.title, job.descriptionText);
+
+  return {
+    title: job.title,
+    company: job.companyName,
+    location: job.location,
+    remoteStatus: job.remoteStatus,
+    employmentType: job.employmentType,
+    applicationUrl: job.applicationUrl,
+    postedAt: job.postedAt,
+    source: job.source,
+    relevance: relevance.score,
+    reasons: describeRelevance(relevance).split(': '),
+    matchedOn: 'remote and recent',
+  };
+}
+
 export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<LiveDigestResult> {
-  const postedWithinDays = options.postedWithinDays ?? 365;
+  const postedWithinDays = options.postedWithinDays ?? 3;
   const includeAllRoles = options.includeAllRoles !== false;
+  const requireRemote = options.requireRemote !== false;
+  const allowHybrid = options.allowHybrid === true;
+  const includeAggregators = options.includeAggregators !== false;
   const maxTotal = options.maxTotal ?? 250;
   const dryRun = options.dryRun === true;
 
   const base: LiveDigestResult = {
     ok: false,
     mode: 'live',
+    postedWithinDays,
+    remoteOnly: requireRemote,
     boardsScanned: 0,
     jobsFetched: 0,
+    fromAggregators: 0,
+    droppedNotRecent: 0,
+    droppedNotRemote: 0,
     matchedTargetRoles: 0,
+    titleMatched: 0,
     alreadySent: 0,
     newRoles: 0,
     heldBack: 0,
@@ -139,11 +180,13 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
     dryRun,
     stateWritten: false,
     messageIds: [],
+    sourceCounts: {},
+    sourceFailures: [],
     jobs: [],
   };
 
-  let collected: CollectedJob[];
-  let boardsScanned: number;
+  let atsJobs: CollectedJob[] = [];
+  let boardsScanned = 0;
 
   try {
     const report = await runIngestion({
@@ -152,77 +195,122 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
       includeSamples: 0,
       maxCompanies: options.maxCompanies ?? 15,
     });
-
-    collected = report.jobs ?? [];
+    atsJobs = report.jobs ?? [];
     boardsScanned = report.companiesScanned;
-  } catch (error) {
-    return {
-      ...base,
-      error: error instanceof Error ? error.message : 'Could not reach the job boards.',
-    };
+  } catch {
+    // Aggregators still work without the ATS boards, so this is not fatal.
   }
 
-  const targetRoles = initialProfile.preferences.target_roles;
-  const remoteOnly = initialProfile.preferences.remote_only;
+  let aggregatorJobs: RemoteBoardJob[] = [];
+  const sourceCounts: Record<string, number> = {};
+  const sourceFailures: LiveDigestResult['sourceFailures'] = [];
+
+  if (includeAggregators) {
+    try {
+      const boards = await fetchRemoteBoards();
+      aggregatorJobs = boards.jobs;
+      Object.assign(sourceCounts, boards.counts);
+      sourceFailures.push(...boards.failed);
+    } catch (error) {
+      sourceFailures.push({
+        source: 'aggregators',
+        reason: error instanceof Error ? error.message : 'Aggregator request failed',
+      });
+    }
+  }
+
+  const totalScanned = boardsScanned + Object.values(sourceCounts).filter((n) => n > 0).length;
   const now = Date.now();
   const seen = new Set<string>();
   const candidates: LiveDigestRow[] = [];
+  let droppedNotRecent = 0;
+  let droppedNotRemote = 0;
 
-  const ordered = [...collected].sort((a, b) => {
-    const left = a.job.postedAt ? Date.parse(a.job.postedAt) : 0;
-    const right = b.job.postedAt ? Date.parse(b.job.postedAt) : 0;
-    return right - left;
-  });
-
-  for (const entry of ordered) {
-    const { job } = entry;
-
-    if (!withinDays(job.postedAt, postedWithinDays, now)) continue;
-
-    if (!includeAllRoles) {
-      const roleCategory = job.roleCategory as RoleCategory;
-      if (!isTargetCandidate(job.title, roleCategory, targetRoles, false)) continue;
-      if (remoteOnly && job.remoteStatus === 'onsite') continue;
+  const push = (row: LiveDigestRow, postedAt: string | null, remoteStatus: RemoteStatus) => {
+    // An undated posting cannot be proven to fall inside the window, so it is dropped
+    // rather than assumed fresh.
+    if (!withinDays(postedAt, postedWithinDays, now)) {
+      droppedNotRecent += 1;
+      return;
     }
 
-    const key = jobKey({
-      company: entry.companyName,
-      title: job.title,
-      url: job.applicationUrl,
-    });
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (requireRemote) {
+      const allowed: RemoteStatus[] = allowHybrid ? ['remote', 'hybrid'] : ['remote'];
+      if (!allowed.includes(remoteStatus)) {
+        droppedNotRemote += 1;
+        return;
+      }
+    }
 
-    candidates.push({
-      title: job.title,
-      company: entry.companyName,
-      location: job.location,
-      remoteStatus: job.remoteStatus,
-      employmentType: job.employmentType,
-      applicationUrl: job.applicationUrl,
-      postedAt: job.postedAt,
-      matchedOn: includeAllRoles ? 'all roles' : 'target role',
-    });
+    const key = jobKey({ company: row.company, title: row.title, url: row.applicationUrl });
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(row);
+  };
+
+  for (const entry of atsJobs) {
+    const { job } = entry;
+    if (!includeAllRoles) {
+      const roleCategory = job.roleCategory as RoleCategory;
+      if (!isTargetCandidate(job.title, roleCategory, initialProfile.preferences.target_roles, false)) continue;
+    }
+
+    const relevance = scoreRelevance(job.title, job.description);
+    push(
+      {
+        title: job.title,
+        company: entry.companyName,
+        location: job.location,
+        remoteStatus: job.remoteStatus,
+        employmentType: job.employmentType,
+        applicationUrl: job.applicationUrl,
+        postedAt: job.postedAt,
+        source: entry.companyName,
+        relevance: relevance.score,
+        reasons: describeRelevance(relevance).split(': '),
+        matchedOn: includeAllRoles ? 'all roles' : 'target role',
+      },
+      job.postedAt,
+      job.remoteStatus
+    );
   }
 
-  const state = await readState();
-  const fresh = candidates.filter((row) => {
-    const key = jobKey({ company: row.company, title: row.title, url: row.applicationUrl });
-    return !state.sent[key];
+  for (const job of aggregatorJobs) {
+    push(toRow(job), job.postedAt, job.remoteStatus);
+  }
+
+  // Best profile match first, then newest, so the top of the digest is the most relevant
+  // rather than merely the most recent.
+  candidates.sort((a, b) => {
+    if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+    return (Date.parse(b.postedAt ?? '') || 0) - (Date.parse(a.postedAt ?? '') || 0);
   });
 
+  const titleMatched = candidates.filter((row) => row.reasons[0]?.startsWith('title')).length;
+
+  const state = await readState();
+  const fresh = candidates.filter(
+    (row) => !state.sent[jobKey({ company: row.company, title: row.title, url: row.applicationUrl })]
+  );
+
   const selected = fresh.slice(0, maxTotal);
-  const messages = buildMessages(selected, boardsScanned);
+  const messages = buildMessages(selected, totalScanned, postedWithinDays);
 
   const result: LiveDigestResult = {
     ...base,
     ok: true,
-    boardsScanned,
-    jobsFetched: collected.length,
+    boardsScanned: totalScanned,
+    jobsFetched: atsJobs.length + aggregatorJobs.length,
+    fromAggregators: aggregatorJobs.length,
+    droppedNotRecent,
+    droppedNotRemote,
     matchedTargetRoles: candidates.length,
+    titleMatched,
     alreadySent: candidates.length - fresh.length,
     newRoles: selected.length,
     heldBack: fresh.length - selected.length,
+    sourceCounts,
+    sourceFailures,
     jobs: selected,
   };
 
@@ -255,8 +343,8 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
   if (result.ok && options.markSent !== false) {
     const next: DigestState = { sent: { ...state.sent } };
     for (const row of selected) {
-      const key = jobKey({ company: row.company, title: row.title, url: row.applicationUrl });
-      next.sent[key] = new Date().toISOString();
+      next.sent[jobKey({ company: row.company, title: row.title, url: row.applicationUrl })] =
+        new Date().toISOString();
     }
 
     const written = await writeState(next);
