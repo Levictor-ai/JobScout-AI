@@ -88,6 +88,40 @@ Do not attempt to implement the entire roadmap in a single step.
 
 ---
 
+## Supabase setup
+
+The app runs without a database, in demo mode. To make it real:
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. Open the SQL editor and run the migrations in order:
+   * `supabase/migrations/20260927000000_initial_schema.sql`
+   * `supabase/migrations/20260927001000_ingestion_fields.sql`
+3. Copy the values from **Project Settings → API** into `.env.local`:
+   * `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   * `SUPABASE_SERVICE_ROLE_KEY` (server only, bypasses RLS, never expose it)
+4. Insert one profile row. This is the account every saved job, application, and match is
+   attributed to until authentication exists:
+
+   ```sql
+   insert into public.profiles (user_id, name, headline, summary, preferences)
+   values (
+     '<your auth.users uuid>',
+     'Your Name',
+     'Product Designer',
+     'Multidisciplinary designer focused on product, UI/UX and brand work.',
+     '{"target_roles":["Product Designer","UI/UX Designer"],"target_seniorities":["mid","senior","lead"],"locations":["Remote","United Kingdom","Europe"],"remote_only":true,"employment_types":["full_time","contract"]}'::jsonb
+   );
+   ```
+
+   The `user_id` must be a real row in `auth.users`, because it is a foreign key. Create
+   one with **Authentication → Users → Add user**, then copy the UUID.
+5. Restart `npm run dev`. The top bar switches from `Demo data` to the live source.
+
+Optional: set `SUPABASE_USER_ID` to that same UUID. It only matters when more than one
+profile row exists, since the app otherwise takes the first row.
+
+---
+
 ## Ingestion
 
 `POST /api/ingest` runs a full scan of every active company.
@@ -109,6 +143,17 @@ curl -X POST http://localhost:3000/api/ingest \
 ```
 
 `GET /api/ingest` reports which sources are supported and which credentials are present.
+
+### Scheduled scans
+
+`vercel.json` runs a daily scan at 06:00 UTC against `GET /api/cron/ingest`. Vercel cron
+only issues GET requests, which is why this route exists alongside the POST API above. It
+requires the same `CRON_SECRET`, and Vercel sends `Authorization: Bearer $CRON_SECRET`
+automatically once that variable is set in the project.
+
+The Hobby plan allows at most two cron jobs, each no more frequent than daily. Scoring is
+deliberately not scheduled: running the model on a timer spends money without anyone
+watching, so `POST /api/analyze` stays a manual step from Settings.
 
 ---
 
