@@ -1,6 +1,7 @@
-﻿import { runIngestion, type CollectedJob } from '@/lib/ingestion/run-ingestion';
+import { runIngestion, type CollectedJob } from '@/lib/ingestion/run-ingestion';
 import { isTargetCandidate, withinDays } from '@/lib/ingestion/filter';
-import { describeRelevance, scoreRelevance } from '@/lib/matching/keyword-match';
+import { countDesignSignals, describeRelevance, scoreRelevance } from '@/lib/matching/keyword-match';
+import { formatEmployment, formatLocationLine, formatPostedAge, formatSalary } from '@/lib/format';
 import { fetchRemoteBoards, type RemoteBoardJob } from '@/lib/sources/remote-boards';
 import { initialProfile } from '@/data/seed-data';
 import { sendTelegramMessage } from '@/lib/notifications/telegram';
@@ -33,6 +34,16 @@ export interface LiveDigestOptions {
   requireRemote?: boolean;
   allowHybrid?: boolean;
   includeAggregators?: boolean;
+  /** Reject anything scoring below this against the target profile. */
+  minRelevance?: number;
+  /** Reject anything whose title does not match a target title. Strictest setting. */
+  requireTitleMatch?: boolean;
+  /**
+   * Require actual design work, not just a design-flavoured title. Builder titles such as
+   * "Product Engineer" collide with ordinary backend postings, so they must be corroborated
+   * by design language in the description.
+   */
+  designFirst?: boolean;
   dryRun?: boolean;
   markSent?: boolean;
 }
@@ -49,6 +60,10 @@ export interface LiveDigestRow {
   /** Keyword relevance 0-100 from the target profile. Not an AI score. */
   relevance: number;
   reasons: string[];
+  salaryText: string | null;
+  /** True when the only title hit was a builder-tier title like "Product Engineer". */
+  builderOnly: boolean;
+  designSignalCount: number;
   matchedOn: string;
 }
 
@@ -62,6 +77,8 @@ export interface LiveDigestResult {
   fromAggregators: number;
   droppedNotRecent: number;
   droppedNotRemote: number;
+  droppedOffProfile: number;
+  droppedNotDesign: number;
   matchedTargetRoles: number;
   titleMatched: number;
   alreadySent: number;
@@ -84,26 +101,19 @@ function escape(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function relativeAge(isoDate: string | null): string {
-  if (!isoDate) return 'date unknown';
-  const parsed = Date.parse(isoDate);
-  if (Number.isNaN(parsed)) return 'date unknown';
-
-  const hours = Math.max(0, Math.round((Date.now() - parsed) / 3_600_000));
-  if (hours < 1) return 'just posted';
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return days < 45 ? `${days}d ago` : `${Math.round(days / 30)}mo ago`;
-}
-
 function renderRow(row: LiveDigestRow): string {
-  const why = row.reasons.filter(Boolean).join(' Â· ');
+  const why = row.reasons.filter(Boolean).join(' · ');
 
   return [
-    `<b>${escape(row.title)}</b>`,
-    `${escape(row.company)} Â· ${escape(row.location ?? 'Location not specified')} Â· ${relativeAge(row.postedAt)}`,
-    `<i>${escape(row.employmentType.replace(/_/g, ' '))} Â· ${escape(why)} Â· via ${escape(row.source)}</i>`,
-    `<a href="${escape(row.applicationUrl)}">View and apply</a>`,
+    '🆕 <b>NEW JOB MATCH</b>',
+    '',
+    `🎯 <a href="${escape(row.applicationUrl)}">${escape(row.title)}</a>`,
+    `🏢 ${escape(row.company)}`,
+    `📍 ${escape(formatLocationLine(row.remoteStatus, row.location))}`,
+    `💼 ${escape(formatEmployment(row.employmentType))}`,
+    `💰 ${escape(row.salaryText ?? 'Not listed')}`,
+    `🕐 ${escape(formatPostedAge(row.postedAt))}`,
+    why ? `<i>🎯 Matched ${escape(why)} · via ${escape(row.source)}</i>` : `<i>via ${escape(row.source)}</i>`,
   ].join('\n');
 }
 
@@ -123,9 +133,9 @@ function buildMessages(rows: LiveDigestRow[], scanned: number, days: number): st
   return chunks.map((chunk, index) => {
     const suffix = chunks.length > 1 ? ` (part ${index + 1}/${chunks.length})` : '';
     const head = [
-      '<b>JobScout AI</b>',
-      `${chunk.length} new remote role${chunk.length === 1 ? '' : 's'} from the last ${days} day${days === 1 ? '' : 's'}${suffix}.`,
-      `<i>${scanned} boards scanned. Ordered by keyword match to your target profile, then newest. Not AI scored.</i>`,
+      `<b>JobScout AI</b> — ${chunk.length} new match${chunk.length === 1 ? '' : 'es'}${suffix}`,
+      `Remote, posted in the last ${days} day${days === 1 ? '' : 's'} · ${scanned} boards scanned`,
+      'Ranked by keyword match to your target profile. Not AI scored.',
     ].join('\n');
 
     return `${head}\n\n${chunk.map(renderRow).join('\n\n')}`;
@@ -146,6 +156,9 @@ function toRow(job: RemoteBoardJob): LiveDigestRow {
     source: job.source,
     relevance: relevance.score,
     reasons: describeRelevance(relevance).split(': '),
+    salaryText: job.salaryText,
+    builderOnly: relevance.builderOnly,
+    designSignalCount: countDesignSignals(job.title, job.descriptionText),
     matchedOn: 'remote and recent',
   };
 }
@@ -157,6 +170,9 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
   const allowHybrid = options.allowHybrid === true;
   const includeAggregators = options.includeAggregators !== false;
   const maxTotal = options.maxTotal ?? 250;
+  const minRelevance = options.minRelevance ?? 0;
+  const requireTitleMatch = options.requireTitleMatch === true;
+  const designFirst = options.designFirst !== false;
   const dryRun = options.dryRun === true;
 
   const base: LiveDigestResult = {
@@ -169,6 +185,8 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
     fromAggregators: 0,
     droppedNotRecent: 0,
     droppedNotRemote: 0,
+    droppedOffProfile: 0,
+    droppedNotDesign: 0,
     matchedTargetRoles: 0,
     titleMatched: 0,
     alreadySent: 0,
@@ -225,6 +243,8 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
   const candidates: LiveDigestRow[] = [];
   let droppedNotRecent = 0;
   let droppedNotRemote = 0;
+  let droppedOffProfile = 0;
+  let droppedNotDesign = 0;
 
   const push = (row: LiveDigestRow, postedAt: string | null, remoteStatus: RemoteStatus) => {
     // An undated posting cannot be proven to fall inside the window, so it is dropped
@@ -240,6 +260,25 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
         droppedNotRemote += 1;
         return;
       }
+    }
+
+    // The profile gate. A job that matches nothing the user actually listed is not a match,
+    // however recently it was posted and wherever it is based.
+    if (requireTitleMatch && !row.reasons[0]?.startsWith('title')) {
+      droppedOffProfile += 1;
+      return;
+    }
+    if (row.relevance < minRelevance) {
+      droppedOffProfile += 1;
+      return;
+    }
+
+    // "Product Engineer" is a real target, but it is also a substring of a lot of backend
+    // software titles. A builder-tier title only counts when the posting consistently shows
+    // design work, not one incidental mention in a long engineering description.
+    if (designFirst && row.builderOnly && row.designSignalCount < 2) {
+      droppedNotDesign += 1;
+      return;
     }
 
     const key = jobKey({ company: row.company, title: row.title, url: row.applicationUrl });
@@ -268,6 +307,9 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
         source: entry.companyName,
         relevance: relevance.score,
         reasons: describeRelevance(relevance).split(': '),
+        builderOnly: relevance.builderOnly,
+        designSignalCount: countDesignSignals(job.title, job.description),
+        salaryText: formatSalary(job.salaryMin, job.salaryMax, job.salaryCurrency),
         matchedOn: includeAllRoles ? 'all roles' : 'target role',
       },
       job.postedAt,
@@ -304,6 +346,8 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
     fromAggregators: aggregatorJobs.length,
     droppedNotRecent,
     droppedNotRemote,
+    droppedOffProfile,
+    droppedNotDesign,
     matchedTargetRoles: candidates.length,
     titleMatched,
     alreadySent: candidates.length - fresh.length,

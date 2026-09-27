@@ -1,4 +1,10 @@
-import { DESCRIPTION_KEYWORDS, TARGET_TITLES, TOOL_KEYWORDS } from '@/data/target-profile';
+import {
+  DESCRIPTION_KEYWORDS,
+  DESIGN_SIGNALS,
+  TARGET_TITLES,
+  TARGET_TITLE_TIERS,
+  TOOL_KEYWORDS,
+} from '@/data/target-profile';
 
 /**
  * Keyword relevance, used to rank jobs in the live digest.
@@ -13,6 +19,8 @@ export interface RelevanceResult {
   /** 0-100, title dominates. Comparable within one run, not across profiles. */
   score: number;
   titleMatched: boolean;
+  /** True when the only title hit was an engineering-flavoured builder title. */
+  builderOnly: boolean;
   matchedTitles: string[];
   matchedKeywords: string[];
   matchedTools: string[];
@@ -47,6 +55,7 @@ export function scoreRelevance(title: string, description: string | null): Relev
   const haystack = normalize(`${title} ${description ?? ''}`);
 
   const matchedTitles = TARGET_TITLES.filter((target) => titleMatches(normalizedTitle, target));
+  const builderOnly = matchedTitles.length > 0 && matchedTitles.every((t) => TARGET_TITLE_TIERS.get(t) === 'builder');
 
   const matchedKeywords = DESCRIPTION_KEYWORDS.filter((keyword) => haystack.includes(normalize(keyword))).filter(
     (keyword) => !TOOL_KEYWORDS.some((tool) => tool.toLowerCase() === keyword)
@@ -59,7 +68,24 @@ export function scoreRelevance(title: string, description: string | null): Relev
     (matchedTitles.length > 0 ? TITLE_WEIGHT : 0) + Math.min(KEYWORD_CAP, distinctHits * KEYWORD_PER_HIT)
   );
 
-  return { score, titleMatched: matchedTitles.length > 0, matchedTitles, matchedKeywords, matchedTools };
+  return { score, titleMatched: matchedTitles.length > 0, builderOnly, matchedTitles, matchedKeywords, matchedTools };
+}
+
+/** True when the posting actually describes design work. */
+export function hasDesignSignal(title: string, description: string | null): boolean {
+  return countDesignSignals(title, description) > 0;
+}
+
+/**
+ * Counts distinct design signals.
+ *
+ * One incidental hit is not evidence. These descriptions run 20,000 characters, so a single
+ * "wireframing" mention while collaborating with designers is normal for a backend role. A
+ * builder-tier title therefore has to clear a threshold rather than pass on one word.
+ */
+export function countDesignSignals(title: string, description: string | null): number {
+  const haystack = normalize(`${title} ${description ?? ''}`);
+  return DESIGN_SIGNALS.filter((signal) => haystack.includes(normalize(signal))).length;
 }
 
 /** Short human-readable reason, for the digest line. */

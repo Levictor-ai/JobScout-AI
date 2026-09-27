@@ -35,6 +35,9 @@ export async function POST(request: Request): Promise<Response> {
     requireRemote?: boolean;
     allowHybrid?: boolean;
     includeAggregators?: boolean;
+    minRelevance?: number;
+    requireTitleMatch?: boolean;
+    designFirst?: boolean;
   } = {};
 
   try {
@@ -68,6 +71,9 @@ export async function POST(request: Request): Promise<Response> {
       requireRemote: body.requireRemote,
       allowHybrid: body.allowHybrid,
       includeAggregators: body.includeAggregators,
+      minRelevance: body.minRelevance,
+      requireTitleMatch: body.requireTitleMatch,
+      designFirst: body.designFirst,
     });
     return Response.json(report, { status: report.ok ? 200 : 502 });
   }

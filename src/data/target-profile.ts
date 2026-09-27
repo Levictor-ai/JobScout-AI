@@ -9,14 +9,24 @@
  * matched against title plus description, and are the weaker signal on their own.
  */
 
+/**
+ * design groups qualify on the title alone. uilder groups are engineering-flavoured
+ * titles that collide with ordinary backend postings ("Product Engineering" is a substring
+ * of plenty of software roles), so they only count when the description also shows design
+ * work. See hasDesignSignal.
+ */
+export type TargetTier = 'design' | 'builder';
+
 export interface TargetGroup {
   label: string;
+  tier: TargetTier;
   titles: string[];
 }
 
 export const PRIMARY_JOB_TITLES: TargetGroup[] = [
   {
     label: 'Product Design',
+    tier: 'design',
     titles: [
       'Product Designer',
       'UI/UX Designer',
@@ -29,6 +39,7 @@ export const PRIMARY_JOB_TITLES: TargetGroup[] = [
   },
   {
     label: 'Brand & Visual Design',
+    tier: 'design',
     titles: [
       'Brand & Visual Design',
       'Brand Designer',
@@ -41,6 +52,7 @@ export const PRIMARY_JOB_TITLES: TargetGroup[] = [
   },
   {
     label: 'AI / Emerging',
+    tier: 'design',
     titles: [
       'AI Product Designer',
       'AI UX Designer',
@@ -53,10 +65,12 @@ export const PRIMARY_JOB_TITLES: TargetGroup[] = [
   },
   {
     label: 'Web & Digital',
+    tier: 'design',
     titles: ['Web Designer', 'Web/UI Designer', 'Digital Designer', 'Web Product Designer'],
   },
   {
     label: 'Hybrid / Builder',
+    tier: 'builder',
     titles: [
       'Product Designer & Developer',
       'Product Engineer',
@@ -71,6 +85,7 @@ export const PRIMARY_JOB_TITLES: TargetGroup[] = [
 export const DESCRIPTION_KEYWORD_GROUPS: TargetGroup[] = [
   {
     label: 'Product Design',
+    tier: 'design',
     titles: [
       'Product design',
       'UI/UX',
@@ -91,6 +106,7 @@ export const DESCRIPTION_KEYWORD_GROUPS: TargetGroup[] = [
   },
   {
     label: 'Tools',
+    tier: 'design',
     titles: [
       'Figma',
       'FigJam',
@@ -105,6 +121,7 @@ export const DESCRIPTION_KEYWORD_GROUPS: TargetGroup[] = [
   },
   {
     label: 'Brand',
+    tier: 'design',
     titles: [
       'Brand identity',
       'Visual identity',
@@ -119,6 +136,7 @@ export const DESCRIPTION_KEYWORD_GROUPS: TargetGroup[] = [
   },
   {
     label: 'AI / Building',
+    tier: 'design',
     titles: [
       'AI products',
       'AI-assisted design',
@@ -134,6 +152,7 @@ export const DESCRIPTION_KEYWORD_GROUPS: TargetGroup[] = [
   },
   {
     label: 'Web',
+    tier: 'design',
     titles: [
       'Web design',
       'Landing pages',
@@ -149,6 +168,59 @@ export const DESCRIPTION_KEYWORD_GROUPS: TargetGroup[] = [
 ];
 
 export const TARGET_TITLES: string[] = PRIMARY_JOB_TITLES.flatMap((group) => group.titles);
+
+/**
+ * Title -> tier, where a title listed in both a design and a builder group counts as design.
+ * "Design Engineer" appears under both, and a design-led reading is the intended one.
+ */
+export const TARGET_TITLE_TIERS: Map<string, TargetTier> = (() => {
+  const tiers = new Map<string, TargetTier>();
+  for (const group of PRIMARY_JOB_TITLES) {
+    for (const title of group.titles) {
+      if (tiers.get(title) !== 'design') tiers.set(title, group.tier);
+    }
+  }
+  return tiers;
+})();
+
+/**
+ * Phrases that show the work is genuinely design, not just software with a design-ish title.
+ *
+ * Deliberately excludes "prototype", "design system", "user interface", and "usability":
+ * those appear in almost every software posting that collaborates with designers, so
+ * including them let four backend roles pass as design work. What is left is either a design
+ * tool a backend role rarely lists, or a practice exclusive to design.
+ */
+export const DESIGN_SIGNALS: string[] = [
+  'product design',
+  'ui/ux',
+  'ux design',
+  'user experience',
+  'user research',
+  'user flow',
+  'wirefram',
+  'design thinking',
+  'usability testing',
+  'visual design',
+  'interaction design',
+  'figma',
+  'figjam',
+  'framer',
+  'photoshop',
+  'illustrator',
+  'indesign',
+  'after effects',
+  'spline',
+  'brand identity',
+  'visual identity',
+  'logo design',
+  'brand system',
+  'brand design',
+  'art direction',
+  'typography',
+  'packaging',
+  'creative direction',
+];
 
 export const DESCRIPTION_KEYWORDS: string[] = Array.from(
   new Set(DESCRIPTION_KEYWORD_GROUPS.flatMap((group) => group.titles).map((keyword) => keyword.toLowerCase()))

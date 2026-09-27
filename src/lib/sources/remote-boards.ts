@@ -1,5 +1,6 @@
-﻿import { fetchJson, asString, asBoolean, toIsoDate, isJsonObject } from './http';
+﻿import { fetchJson, asString, asNumber, asBoolean, toIsoDate, isJsonObject } from './http';
 import { htmlToText } from './text';
+import { formatSalary } from '@/lib/format';
 import type { EmploymentType, Json, RemoteStatus } from '@/types';
 
 /**
@@ -31,6 +32,8 @@ export interface RemoteBoardJob {
   postedAt: string | null;
   /** Truncated, used only for keyword matching. Never shown in the digest. */
   descriptionText: string | null;
+  /** Pre-formatted by the source, null when the board does not disclose pay. */
+  salaryText: string | null;
 }
 
 export interface RemoteBoardResult {
@@ -96,6 +99,7 @@ async function remoteOk(): Promise<RemoteBoardJob[]> {
       applicationUrl: url,
       postedAt: toIsoDate(row.date),
       descriptionText: description(row, 'description'),
+      salaryText: formatSalary(asNumber(row.salary_min), asNumber(row.salary_max), null),
     }];
   });
 }
@@ -119,6 +123,7 @@ async function remotive(): Promise<RemoteBoardJob[]> {
       applicationUrl: url,
       postedAt: toIsoDate(row.publication_date),
       descriptionText: description(row, 'description'),
+      salaryText: clean(asString(row.salary)) || null,
     }];
   });
 }
@@ -146,6 +151,7 @@ async function arbeitnow(): Promise<RemoteBoardJob[]> {
       applicationUrl: url,
       postedAt: toIsoDate(row.created_at),
       descriptionText: description(row, 'description'),
+      salaryText: null,
     }];
   });
 }
@@ -169,10 +175,13 @@ async function jobicy(): Promise<RemoteBoardJob[]> {
       applicationUrl: url,
       postedAt: toIsoDate(row.pubDate),
       descriptionText: description(row, 'jobDescription', 'description'),
+      salaryText: formatSalary(asNumber(row.salaryMin), asNumber(row.salaryMax), asString(row.salaryCurrency)),
     }];
   });
 }
 
+// Kept, not inlined, so the source can be re-enabled without rewriting it. See SOURCES.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function himalayas(): Promise<RemoteBoardJob[]> {
   const all = await load('Himalayas', 'https://himalayas.app/jobs/api?limit=50', 'jobs');
 
@@ -192,6 +201,7 @@ async function himalayas(): Promise<RemoteBoardJob[]> {
       applicationUrl: url,
       postedAt: toIsoDate(row.pubDate),
       descriptionText: description(row, 'jobDescription', 'description'),
+      salaryText: formatSalary(asNumber(row.minSalary), asNumber(row.maxSalary), asString(row.currency)),
     }];
   });
 }
@@ -201,7 +211,11 @@ const SOURCES: Array<{ name: string; load: () => Promise<RemoteBoardJob[]> }> = 
   { name: 'Remotive', load: remotive },
   { name: 'Arbeitnow', load: arbeitnow },
   { name: 'Jobicy', load: jobicy },
-  { name: 'Himalayas', load: himalayas },
+
+  // Disabled: the JSON API serves fine, but every job page returns HTTP 403 behind bot
+  // protection, verified across four URLs and two header sets. Shipping links that 403 is
+  // worse than shipping fewer jobs. Re-enable if a real browser can reach these pages.
+  // { name: 'Himalayas', load: himalayas },
 ];
 
 export async function fetchRemoteBoards(): Promise<RemoteBoardResult> {
