@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { getActorId } from '@/lib/data/queries';
 import { runIngestion, type CollectedJob } from '@/lib/ingestion/run-ingestion';
 import type { RoleCategory } from '@/lib/sources/types';
 import { analyzeJob, matchJob } from './analyze';
@@ -108,12 +109,14 @@ function mergeProfile(override?: Partial<MatchProfileInput>): MatchProfileInput 
 async function loadProfileFromDb(
   supabase: SupabaseClient
 ): Promise<MatchProfileInput | null> {
+  const actorId = await getActorId();
+
   const { data, error } = await supabase
     .from('profiles')
     .select(
       'id, name, headline, summary, years_experience, location, portfolio_url, linkedin_url, resume_text, preferences, skills(name, category, proficiency)'
     )
-    .limit(1)
+    .eq('user_id', actorId ?? '')
     .maybeSingle();
 
   if (error || !data) return null;

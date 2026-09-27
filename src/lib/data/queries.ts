@@ -1,6 +1,7 @@
 import { cache } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { getSessionViewerId } from '@/lib/supabase/auth';
 import type {
   Application,
   ApplicationStatus,
@@ -146,25 +147,51 @@ function asJob(row: Record<string, unknown>, match: JobMatch | null, application
  * The dashboard owner. Profiles are keyed to `auth.users`, so the first profile row
  * identifies the single local user this deployment is scoped to.
  */
+/**
+ * The signed-in viewer's auth user id.
+ *
+ * This used to fall back to "the first row in `profiles`", which meant every anonymous
+ * visitor to the deployment was silently treated as that one user: they could read the
+ * profile and, because server components use the service-role key and bypass RLS, write to
+ * their saved jobs and application pipeline. It now resolves only from a verified session,
+ * so an unauthenticated request gets null and sees no personal data.
+ */
 export const getViewerId = cache(async (): Promise<string | null> => {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return null;
+  return getSessionViewerId();
+});
+
+/**
+ * The primary user this deployment is scoped to, for callers that have no browser session:
+ * cron digests, scheduled ingestion and the analysis pipeline. Never use this to serve a
+ * request that came from a person.
+ */
+export const getPrimaryUserId = cache(async (): Promise<string | null> => {
   const supabase = getSupabaseServerClient();
   if (!supabase) return null;
 
-  const configured = process.env.SUPABASE_USER_ID;
-  if (configured) return configured;
-
-  const { data } = await supabase.from('profiles').select('user_id').limit(1).maybeSingle();
+  const { data } = await supabase.from('profiles').select('user_id').not('user_id', 'is', null).limit(1).maybeSingle();
   return (data?.user_id as string | undefined) ?? null;
+});
+
+/** Session user when there is one, otherwise the primary user for system/cron callers. */
+export const getActorId = cache(async (): Promise<string | null> => {
+  const sessionId = await getSessionViewerId();
+  if (sessionId) return sessionId;
+  return getPrimaryUserId();
 });
 
 export const getProfile = cache(async (): Promise<Profile> => {
   const supabase = getSupabaseServerClient();
   if (!supabase) return initialProfile;
 
+  const viewerId = await getViewerId();
+  if (!viewerId) return initialProfile;
+
   const { data } = await supabase
     .from('profiles')
     .select('id, user_id, name, headline, summary, years_experience, location, portfolio_url, linkedin_url, resume_text, preferences, created_at, updated_at')
-    .limit(1)
+    .eq('user_id', viewerId)
     .maybeSingle();
 
   if (!data) return initialProfile;

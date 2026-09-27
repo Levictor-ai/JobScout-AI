@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { getActorId } from '@/lib/data/queries';
 import {
   formatDigest,
   formatMatchNotification,
@@ -81,10 +82,14 @@ export async function notifyHighMatchJobs(
     return { ...report, skipped: true, reason: 'Supabase is not configured.' };
   }
 
+  // Cron has no browser session, so this resolves to the primary user. Scoping by actor keeps
+  // the notification preferences correct once more than one account exists.
+  const actorId = await getActorId();
+
   const { data: profileRows } = await supabase
     .from('profiles')
     .select('preferences')
-    .limit(1)
+    .eq('user_id', actorId ?? '')
     .maybeSingle();
 
   const preferences = (profileRows?.preferences ?? null) as { notify_telegram?: boolean } | null;

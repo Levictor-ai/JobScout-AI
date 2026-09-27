@@ -18,7 +18,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const engineHealthy = capabilities.persistence;
 
   return (
-    <div className="flex min-h-screen bg-zinc-50/60 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans">
+    <div className="flex min-h-dvh bg-zinc-50/60 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans">
       <Sidebar
         savedCount={savedCount}
         ownerName={profile.name}
@@ -38,8 +38,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           jobCount={feed.totalInDatabase}
           openaiConfigured={capabilities.openai}
           telegramConfigured={capabilities.telegram}
+          ownerName={profile.name}
+          ownerHeadline={profile.headline}
+          savedCount={savedCount}
         />
-        <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto space-y-6">{children}</main>
+        <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-7xl w-full mx-auto space-y-4 sm:space-y-6">{children}</main>
       </div>
     </div>
   );

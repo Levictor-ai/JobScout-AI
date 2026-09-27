@@ -56,7 +56,7 @@ export async function toggleSavedJob(jobId: string): Promise<ActionResult> {
   if (!supabase) return notReady();
 
   const viewerId = await getViewerId();
-  if (!viewerId) return invalid('No profile is linked to a user yet. Add a row to the profiles table first.');
+  if (!viewerId) return invalid('Sign in to track this role.');
 
   const { data: existing } = await supabase
     .from('saved_jobs')
@@ -95,7 +95,7 @@ export async function setApplicationStatus(jobId: string, status: string): Promi
   if (!supabase) return notReady();
 
   const viewerId = await getViewerId();
-  if (!viewerId) return invalid('No profile is linked to a user yet. Add a row to the profiles table first.');
+  if (!viewerId) return invalid('Sign in to track this role.');
 
   if (status === 'discovered') {
     const { error } = await supabase
@@ -135,7 +135,7 @@ export async function updateApplicationNotes(jobId: string, notes: string): Prom
   if (!supabase) return notReady();
 
   const viewerId = await getViewerId();
-  if (!viewerId) return invalid('No profile is linked to a user yet. Add a row to the profiles table first.');
+  if (!viewerId) return invalid('Sign in to track this role.');
 
   const { error } = await supabase
     .from('applications')

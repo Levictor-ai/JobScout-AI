@@ -3,18 +3,9 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  LayoutDashboard,
-  Compass,
-  Bookmark,
-  Briefcase,
-  Building2,
-  User,
-  Settings,
-  Sparkles,
-  Bot,
-  Radio,
-} from 'lucide-react';
+import { Sparkles, Radio, LogOut } from 'lucide-react';
+import { signOutAction } from '@/app/login/actions';
+import { initials, navItems } from './nav-items';
 
 interface SidebarProps {
   savedCount: number;
@@ -23,21 +14,6 @@ interface SidebarProps {
   engineLabel: string;
   engineDetail: string;
   engineHealthy: boolean;
-}
-
-const navItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, href: '/' },
-  { id: 'discover', label: 'Discover', icon: Compass, href: '/discover' },
-  { id: 'saved', label: 'Saved Jobs', icon: Bookmark, href: '/saved' },
-  { id: 'applications', label: 'Applications', icon: Briefcase, href: '/applications' },
-  { id: 'companies', label: 'Companies & ATS', icon: Building2, href: '/companies' },
-  { id: 'profile', label: 'Profile & Matching', icon: User, href: '/profile' },
-  { id: 'settings', label: 'Settings', icon: Settings, href: '/settings' },
-];
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  return parts.map((part) => part[0]?.toUpperCase() ?? '').join('') || 'JS';
 }
 
 export function Sidebar({
@@ -51,7 +27,7 @@ export function Sidebar({
   const pathname = usePathname();
 
   return (
-    <aside className="w-64 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex flex-col shrink-0 h-screen sticky top-0 transition-colors">
+    <aside className="hidden lg:flex w-64 shrink-0 h-screen sticky top-0 flex-col border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 transition-colors">
       <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-sm shadow-indigo-500/20">
@@ -127,7 +103,16 @@ export function Sidebar({
             <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">{ownerName}</p>
             <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">{ownerHeadline ?? 'Profile not set'}</p>
           </div>
-          <Bot className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+          <form action={signOutAction}>
+            <button
+              type="submit"
+              title="Sign out"
+              aria-label="Sign out"
+              className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </form>
         </div>
       </div>
     </aside>

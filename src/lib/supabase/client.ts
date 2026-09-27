@@ -1,7 +1,12 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 let supabaseClient: SupabaseClient | null = null;
 
+/**
+ * Browser client backed by cookies rather than localStorage, so the session the browser holds
+ * is the same one server components and `proxy.ts` can read.
+ */
 export function getSupabaseClient(): SupabaseClient | null {
   if (supabaseClient) return supabaseClient;
 
@@ -17,6 +22,6 @@ export function getSupabaseClient(): SupabaseClient | null {
     return null;
   }
 
-  supabaseClient = createClient(url, anonKey);
+  supabaseClient = createBrowserClient(url, anonKey);
   return supabaseClient;
 }

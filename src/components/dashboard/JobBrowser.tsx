@@ -149,7 +149,7 @@ export function JobBrowser({
                 : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-transparent'
             }`}
           >
-            {remoteOnly ? '✓ Remote Only' : 'All Locations'}
+            {remoteOnly ? 'âœ“ Remote Only' : 'All Locations'}
           </button>
         </div>
       </div>
@@ -172,7 +172,7 @@ export function JobBrowser({
       </div>
 
       {filtered.length === 0 ? (
-        <div className="p-12 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 bg-white/40 dark:bg-zinc-900/40">
+        <div className="p-8 sm:p-12 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 bg-white/40 dark:bg-zinc-900/40">
           <Sparkles className="w-8 h-8 text-zinc-400 mx-auto mb-2" />
           <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{emptyTitle}</h3>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">{emptyBody}</p>

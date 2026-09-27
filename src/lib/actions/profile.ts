@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { getSessionViewerId } from '@/lib/supabase/auth';
 import type { AtsType } from '@/types';
 import type { ActionResult } from './jobs';
 
@@ -46,9 +47,19 @@ export async function saveProfileAction(formData: FormData): Promise<ActionResul
   const supabase = getSupabaseServerClient();
   if (!supabase) return notReady();
 
-  const { data: existing } = await supabase.from('profiles').select('id, preferences').limit(1).maybeSingle();
+  const viewerId = await getSessionViewerId();
+  if (!viewerId) {
+    return { ok: false, message: 'You need to be signed in to edit a profile.' };
+  }
+
+  const { data: existing } = await supabase
+    .from('profiles')
+    .select('id, preferences')
+    .eq('user_id', viewerId)
+    .maybeSingle();
+
   if (!existing) {
-    return { ok: false, message: 'No profile row exists yet. Insert one linked to your auth user, then edit it here.' };
+    return { ok: false, message: 'No profile row exists for your account yet. Run the profile trigger migration, or insert one linked to your auth user.' };
   }
 
   const preferences = (existing.preferences as Record<string, unknown>) ?? {};

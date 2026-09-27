@@ -53,7 +53,7 @@ export function CompanyManager({ companies, dataSource }: CompanyManagerProps) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-2.5">
           {companies.length === 0 && (
-            <div className="p-10 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800">
+            <div className="p-8 sm:p-10 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800">
               <Building2 className="w-7 h-7 text-zinc-400 mx-auto mb-2" />
               <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">No companies configured</p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
@@ -92,7 +92,7 @@ export function CompanyManager({ companies, dataSource }: CompanyManagerProps) {
                 {company.lastError ? (
                   <>
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                    <span className="max-w-[16rem] truncate">{company.lastError}</span>
+                    <span className="max-w-[10rem] sm:max-w-[16rem] truncate">{company.lastError}</span>
                   </>
                 ) : company.lastSuccessAt ? (
                   <>

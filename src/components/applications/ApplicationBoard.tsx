@@ -53,7 +53,7 @@ export function ApplicationBoard({ rows, readOnly }: ApplicationBoardProps) {
 
   if (rows.length === 0) {
     return (
-      <div className="p-12 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 bg-white/40 dark:bg-zinc-900/40">
+      <div className="p-8 sm:p-12 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 bg-white/40 dark:bg-zinc-900/40">
         <Briefcase className="w-8 h-8 text-zinc-400 mx-auto mb-2" />
         <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">No applications tracked yet</h3>
         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">
@@ -115,8 +115,8 @@ export function ApplicationBoard({ rows, readOnly }: ApplicationBoardProps) {
                 )}
               </div>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                {job.company.name} · {job.location ?? 'Remote'} · {job.company.ats_type}
-                {application.applied_at ? ` · applied ${new Date(application.applied_at).toLocaleDateString('en-US')}` : ''}
+                {job.company.name} Â· {job.location ?? 'Remote'} Â· {job.company.ats_type}
+                {application.applied_at ? ` Â· applied ${new Date(application.applied_at).toLocaleDateString('en-US')}` : ''}
               </p>
             </div>
 
