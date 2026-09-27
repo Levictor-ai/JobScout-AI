@@ -41,6 +41,22 @@ export async function GET(request: Request): Promise<Response> {
     // than discovered halfway through sending.
     const store = await resolveDigestStore();
 
+    // A serverless deployment cannot write the dedupe file, so every run would treat the whole
+    // digest as new and resend it hourly. Refusing loudly beats spamming, and the fix is one
+    // migration. A dry run is still allowed because it sends nothing.
+    const ephemeral = store.name === 'file' && Boolean(process.env.VERCEL);
+    if (ephemeral && !dryRun && param('allowEphemeral') !== '1') {
+      return Response.json(
+        {
+          ok: false,
+          dedupeStore: store.name,
+          error:
+            'Durable dedupe is unavailable on this deployment, so nothing was sent. Apply supabase/migrations/20260927002000_digest_dedupe.sql, or pass ?allowEphemeral=1 to send once and accept the duplicates.',
+        },
+        { status: 503 }
+      );
+    }
+
     const result = await sendLiveDigest({
       postedWithinDays: positiveInt(param('days'), 3),
       requireRemote: param('remote') !== '0',
