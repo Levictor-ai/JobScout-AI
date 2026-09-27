@@ -99,26 +99,30 @@ The app runs without a database, in demo mode. To make it real:
 3. Copy the values from **Project Settings → API** into `.env.local`:
    * `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    * `SUPABASE_SERVICE_ROLE_KEY` (server only, bypasses RLS, never expose it)
-4. Insert one profile row. This is the account every saved job, application, and match is
-   attributed to until authentication exists:
+4. Create one user with your own password under **Authentication → Users → Add user**.
+5. Open `supabase/seed.sql`, replace `replace-me@example.com` with that email, and run it
+   in the SQL editor. It looks the user up by email and inserts the matching
+   `profiles` row, so no credentials or fixed UUID are committed here.
+6. Restart `npm run dev`. The top bar switches from `Demo data` to the live source.
 
-   ```sql
-   insert into public.profiles (user_id, name, headline, summary, preferences)
-   values (
-     '<your auth.users uuid>',
-     'Your Name',
-     'Product Designer',
-     'Multidisciplinary designer focused on product, UI/UX and brand work.',
-     '{"target_roles":["Product Designer","UI/UX Designer"],"target_seniorities":["mid","senior","lead"],"locations":["Remote","United Kingdom","Europe"],"remote_only":true,"employment_types":["full_time","contract"]}'::jsonb
-   );
-   ```
+The profile row matters: it is the single account every saved job, application, and match
+is attributed to until authentication exists. The seeded preferences use the exact keys the
+code reads, `target_roles`, `preferred_locations`, `employment_types`, `remote_only`,
+`min_match_score`, and `notify_telegram`. Anything else you add to that jsonb is ignored.
 
-   The `user_id` must be a real row in `auth.users`, because it is a foreign key. Create
-   one with **Authentication → Users → Add user**, then copy the UUID.
-5. Restart `npm run dev`. The top bar switches from `Demo data` to the live source.
-
-Optional: set `SUPABASE_USER_ID` to that same UUID. It only matters when more than one
+Optional: set `SUPABASE_USER_ID` to that user's UUID. It only matters when more than one
 profile row exists, since the app otherwise takes the first row.
+
+### Local Supabase instead of a hosted project
+
+With Docker running and the [Supabase CLI](https://supabase.com/docs/guides/cli)
+installed:
+
+```bash
+supabase start        # applies supabase/migrations, then supabase/seed.sql
+supabase status       # prints the local API URL and keys
+supabase stop
+```
 
 ---
 
