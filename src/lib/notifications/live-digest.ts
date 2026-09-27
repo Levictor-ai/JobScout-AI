@@ -5,7 +5,8 @@ import { formatEmployment, formatLocationLine, formatPostedAge, formatSalary } f
 import { fetchRemoteBoards, type RemoteBoardJob } from '@/lib/sources/remote-boards';
 import { initialProfile } from '@/data/seed-data';
 import { sendTelegramMessage } from '@/lib/notifications/telegram';
-import { jobKey, readState, writeState, type DigestState } from '@/lib/notifications/live-state';
+import { jobKey } from '@/lib/notifications/live-state';
+import { resolveDigestStore, type DigestStore, type DigestSentMap } from '@/lib/notifications/digest-store';
 import type { RemoteStatus } from '@/types';
 import type { RoleCategory } from '@/lib/sources/types';
 
@@ -46,6 +47,12 @@ export interface LiveDigestOptions {
   designFirst?: boolean;
   dryRun?: boolean;
   markSent?: boolean;
+  /**
+   * Where "already sent" is remembered. Defaults to Supabase when it is configured and
+   * migrated, otherwise a local JSON file. Injected by the scheduled route so a serverless run
+   * cannot silently fall back to a filesystem it cannot write to.
+   */
+  store?: DigestStore;
 }
 
 export interface LiveDigestRow {
@@ -88,6 +95,8 @@ export interface LiveDigestResult {
   rolesSent: number;
   failedMessages: number;
   dryRun: boolean;
+  /** Which store answered "already sent", so a scheduled run can be audited. */
+  dedupeStore: 'supabase' | 'file';
   stateWritten: boolean;
   stateError?: string;
   sourceCounts: Record<string, number>;
@@ -196,6 +205,7 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
     rolesSent: 0,
     failedMessages: 0,
     dryRun,
+    dedupeStore: 'file',
     stateWritten: false,
     messageIds: [],
     sourceCounts: {},
@@ -330,9 +340,10 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
 
   const titleMatched = candidates.filter((row) => row.reasons[0]?.startsWith('title')).length;
 
-  const state = await readState();
+  const store = options.store ?? (await resolveDigestStore());
+  const sentBefore = await store.read();
   const fresh = candidates.filter(
-    (row) => !state.sent[jobKey({ company: row.company, title: row.title, url: row.applicationUrl })]
+    (row) => !sentBefore[jobKey({ company: row.company, title: row.title, url: row.applicationUrl })]
   );
 
   const selected = fresh.slice(0, maxTotal);
@@ -341,6 +352,7 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
   const result: LiveDigestResult = {
     ...base,
     ok: true,
+    dedupeStore: store.name,
     boardsScanned: totalScanned,
     jobsFetched: atsJobs.length + aggregatorJobs.length,
     fromAggregators: aggregatorJobs.length,
@@ -385,13 +397,13 @@ export async function sendLiveDigest(options: LiveDigestOptions = {}): Promise<L
   if (errors.length > 0) result.error = errors[0];
 
   if (result.ok && options.markSent !== false) {
-    const next: DigestState = { sent: { ...state.sent } };
+    const next: DigestSentMap = { ...sentBefore };
     for (const row of selected) {
-      next.sent[jobKey({ company: row.company, title: row.title, url: row.applicationUrl })] =
+      next[jobKey({ company: row.company, title: row.title, url: row.applicationUrl })] =
         new Date().toISOString();
     }
 
-    const written = await writeState(next);
+    const written = await store.write(next);
     result.stateWritten = written.ok;
     if (!written.ok) result.stateError = written.error;
   }

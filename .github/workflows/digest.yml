@@ -1,0 +1,49 @@
+name: Hourly job digest
+
+# Triggers the production digest route every hour. The route dedupes, so a run that finds
+# nothing new sends nothing; the schedule only decides how quickly a new posting is noticed.
+on:
+  schedule:
+    # Off the hour on purpose: every repo's cron fires at :00 and GitHub queues them.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+# Never let two digests overlap, or the same posting can be sent twice before either run has
+# recorded it.
+concurrency:
+  group: hourly-job-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    name: Send new job matches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger digest
+        env:
+          DIGEST_URL: ${{ vars.DIGEST_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          url="${DIGEST_URL:-https://job-scout-ai-rho.vercel.app/api/cron/digest}"
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "CRON_SECRET is not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          status=$(curl -sS -o response.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${url}")
+
+          echo "HTTP ${status}"
+          echo '--- response ---'
+          cat response.json
+          echo
+
+          if [ "${status}" != "200" ]; then
+            echo "Digest run failed with HTTP ${status}."
+            exit 1
+          fi
