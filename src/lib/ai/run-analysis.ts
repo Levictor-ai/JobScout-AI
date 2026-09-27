@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { runIngestion, type CollectedJob } from '@/lib/ingestion/run-ingestion';
-import { normalizeForDedupe } from '@/lib/ingestion/normalize';
 import type { RoleCategory } from '@/lib/sources/types';
 import { analyzeJob, matchJob } from './analyze';
 import { getModel } from './client';
@@ -9,23 +8,13 @@ import type { AiUsage } from './client';
 import type { JobAnalysis, MatchAnalysis } from './schemas';
 import type { AnalysisJobInput, ChatMessage, MatchProfileInput } from './prompts';
 import { buildAnalysisMessages, buildMatchMessages } from './prompts';
+import { isTargetCandidate, withinDays } from '@/lib/ingestion/filter';
 import { initialProfile } from '@/data/seed-data';
 import type { Json, MatchRecommendation, SeniorityLevel } from '@/types';
 
 const DEFAULT_LIMIT = 10;
 const DEFAULT_POSTED_WITHIN_DAYS = 30;
 const DEFAULT_CONCURRENCY = 2;
-
-const TARGET_ROLE_CATEGORIES: RoleCategory[] = [
-  'product_design',
-  'ux_ui',
-  'brand_design',
-  'graphic_design',
-  'web_design',
-  'design_engineering',
-  'product_engineering',
-  'research',
-];
 
 export interface AnalysisJobResult {
   jobId: string | null;
@@ -163,33 +152,6 @@ async function loadProfileFromDb(
     remoteOnly: preferences.remote_only ?? false,
     skills,
   };
-}
-
-function withinDays(isoDate: string | null, days: number): boolean {
-  if (!isoDate) return false;
-  const parsed = Date.parse(isoDate);
-  if (Number.isNaN(parsed)) return false;
-  return Date.now() - parsed <= days * 24 * 60 * 60 * 1000;
-}
-
-function isTargetTitle(title: string, targetRoles: string[]): boolean {
-  if (targetRoles.length === 0) return false;
-  const haystack = normalizeForDedupe(title);
-  return targetRoles.some((role) => {
-    const needle = normalizeForDedupe(role);
-    return needle.length > 2 && haystack.includes(needle);
-  });
-}
-
-function isTargetCandidate(
-  title: string,
-  roleCategory: RoleCategory,
-  targetRoles: string[],
-  includeAllRoles: boolean
-): boolean {
-  if (includeAllRoles) return true;
-  if (TARGET_ROLE_CATEGORIES.includes(roleCategory)) return true;
-  return isTargetTitle(title, targetRoles);
 }
 
 /**

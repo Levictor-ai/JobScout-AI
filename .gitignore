@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files
 .env*
+
+# Local digest "already sent" state, machine-specific
+.local/
 !.env.example
 
 # vercel
