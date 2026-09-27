@@ -67,6 +67,7 @@ export const greenhouseAdapter: JobSourceAdapter = {
         title,
         description: description || 'Not specified.',
         location,
+        team: department,
         remoteStatus: inferRemoteStatus(location),
         employmentType: inferEmploymentType(title),
         seniority: inferSeniority(title, department),

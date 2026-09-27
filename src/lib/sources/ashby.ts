@@ -146,6 +146,7 @@ export const ashbyAdapter: JobSourceAdapter = {
         title,
         description: description || 'Not specified.',
         location,
+        team: department,
         remoteStatus: inferRemoteStatus(location, {
           isRemote: asBoolean(job.isRemote),
           workplaceType: asString(job.workplaceType),

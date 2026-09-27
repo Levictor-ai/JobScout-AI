@@ -56,6 +56,13 @@ export interface IngestionReport {
   failedSources: number;
   sources: SourceScanResult[];
   samples: IngestionSample[];
+  jobs?: CollectedJob[];
+}
+
+export interface CollectedJob {
+  companyId: string | null;
+  companyName: string;
+  job: NormalizedJob;
 }
 
 export interface RunIngestionOptions {
@@ -63,6 +70,7 @@ export interface RunIngestionOptions {
   companyIds?: string[];
   maxCompanies?: number;
   includeSamples?: number;
+  collectJobs?: boolean;
 }
 
 export function isPersistenceAvailable(): boolean {
@@ -426,6 +434,7 @@ export async function runIngestion(
 
   const results: SourceScanResult[] = [];
   const samples: IngestionSample[] = [];
+  const collected: CollectedJob[] = [];
   const sampleLimit = options.includeSamples ?? (dryRun ? 10 : 0);
 
   for (const [index, company] of companies.entries()) {
@@ -494,6 +503,14 @@ export async function runIngestion(
       }
 
       for (const entry of deduped.unique) {
+        if (options.collectJobs) {
+          collected.push({
+            companyId: company.companyId || null,
+            companyName: company.companyName,
+            job: entry.job,
+          });
+        }
+
         if (samples.length >= sampleLimit) break;
         samples.push({
           company: company.companyName,
@@ -546,5 +563,6 @@ export async function runIngestion(
     failedSources: results.filter((result) => result.status !== 'completed').length,
     sources: results,
     samples,
+    ...(options.collectJobs ? { jobs: collected } : {}),
   };
 }

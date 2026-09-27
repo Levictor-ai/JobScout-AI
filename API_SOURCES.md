@@ -1,5 +1,80 @@
 # JobScout AI API Sources
 
+## Verified Endpoints
+
+Each endpoint below was called and confirmed working. No authentication.
+
+### Greenhouse
+
+```text
+GET https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs?content=true
+```
+
+Response: `{ jobs: [...] }`
+
+Fields used:
+
+* `id`
+* `title`
+* `content` (HTML description)
+* `location.name`
+* `departments[].name`
+* `absolute_url`
+* `first_published`
+* `updated_at`
+
+Notes:
+
+* There is no pagination. Large boards return 5–9 MB in a single response.
+* The public board API does not expose salary.
+
+---
+
+### Ashby
+
+```text
+GET https://api.ashbyhq.com/posting-api/job-board/{org}?includeCompensation=true
+```
+
+Response: `{ jobs: [...] }`
+
+Fields used:
+
+* `id`
+* `title`
+* `descriptionPlain` (falls back to `descriptionHtml`)
+* `location`, `secondaryLocations[].location`
+* `department`, `team`
+* `employmentType`
+* `isRemote`, `workplaceType`
+* `isListed` (unlisted postings are skipped)
+* `publishedAt`
+* `jobUrl`, `applyUrl`
+* `compensation.summaryComponents[]`, `compensation.compensationTiers[].components[]`
+
+---
+
+### Lever
+
+Status: unusable at the time of writing.
+
+```text
+GET https://api.lever.co/v0/postings/{site}?mode=json
+```
+
+The endpoint answered `404` for every board tested, including Lever's own demo
+board and both the global and EU hosts. Lever-hosted pages
+(`https://jobs.lever.co/{site}`) still render, but there is no reachable public
+JSON API to read.
+
+The authenticated Lever API (`https://api.lever.co/v1`) requires an account API
+key, so it cannot be used for third-party monitoring.
+
+Lever is therefore excluded from ingestion until a public endpoint is verified
+again. No HTML scraping is used as a substitute.
+
+---
+
 ## Primary Sources
 
 ### Greenhouse
@@ -22,16 +97,7 @@ Do not assume every company uses the same configuration.
 
 ## Lever
 
-Use the public Lever postings interface where available.
-
-Purpose:
-
-Retrieve published jobs.
-
-Required information:
-
-* Company identifier
-* Published job listings
+Reserved for a future release. See the status note above.
 
 ---
 
@@ -73,12 +139,16 @@ Example conceptual interface:
 
 ```typescript
 interface JobSourceAdapter {
-  fetchJobs(source: JobSource): Promise<RawJob[]>
-  normalizeJob(job: RawJob): NormalizedJob
+  endpoint(config: SourceConfig): string
+  careersUrl(config: SourceConfig): string
+  fetchJobs(config: SourceConfig): Promise<NormalizedJob[]>
 }
 ```
 
 This allows new sources to be added without rewriting the ingestion system.
+
+Implemented in `src/lib/sources/`. A new source means adding one adapter file and
+registering it in `src/lib/sources/index.ts`.
 
 ---
 

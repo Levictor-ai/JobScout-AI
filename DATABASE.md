@@ -109,8 +109,21 @@ Fields:
 * application_url
 * source_url
 * raw_data
+* role_category
+* dedupe_key
+* content_hash
+* last_seen_at
 * created_at
 * updated_at
+
+Notes:
+
+* `role_category` is set by the normalizer (product_design, ux_ui, brand_design,
+  graphic_design, web_design, design_engineering, product_engineering, research, other).
+* `dedupe_key` is company + normalized title + team + location + employment type.
+* `content_hash` changes only when the job content actually changed, so repeat
+  scans do not create update churn.
+* `last_seen_at` is refreshed on every scan where the posting is still listed.
 
 ---
 
@@ -197,3 +210,24 @@ Fields:
 * jobs_updated
 * error
 * status
+
+---
+
+## notification_log
+
+Records what was already sent so the same job is never notified twice.
+
+Fields:
+
+* id
+* channel
+* job_id
+* match_score
+* telegram_message_id
+* status
+* error
+* sent_at
+
+Unique on:
+
+* channel + job_id

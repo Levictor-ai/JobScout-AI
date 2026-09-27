@@ -28,6 +28,7 @@ export interface NormalizedJob {
   title: string;
   description: string;
   location: string | null;
+  team: string | null;
   remoteStatus: RemoteStatus;
   employmentType: EmploymentType;
   seniority: SeniorityLevel;

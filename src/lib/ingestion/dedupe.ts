@@ -20,8 +20,9 @@ export interface DedupeResult {
 export function buildDedupeKey(companyId: string, job: NormalizedJob): string {
   const title = normalizeForDedupe(job.title);
   const location = normalizeForDedupe(job.location ?? '');
+  const team = normalizeForDedupe(job.team ?? '');
   const employment = normalizeForDedupe(job.employmentType);
-  return [companyId, title, location, employment].join('|');
+  return [companyId, title, team, location, employment].join('|');
 }
 
 export function buildContentHash(job: NormalizedJob): string {

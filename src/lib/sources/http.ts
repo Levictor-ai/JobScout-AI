@@ -3,7 +3,7 @@ import { SourceError } from './types';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_RETRIES = 2;
-const MAX_RESPONSE_BYTES = 8_000_000;
+const MAX_RESPONSE_BYTES = 32_000_000;
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
