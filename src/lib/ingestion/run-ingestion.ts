@@ -3,7 +3,7 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { getAdapter } from '@/lib/sources';
 import type { NormalizedJob, SourceConfig } from '@/lib/sources/types';
 import { buildContentHash, buildDedupeKey, dedupeJobs } from './dedupe';
-import { DEFAULT_COMPANIES, toCompanyRow } from './default-companies';
+import { DEFAULT_COMPANIES } from './default-companies';
 import type { AtsType, Json } from '@/types';
 
 const BATCH_SIZE = 200;
@@ -56,6 +56,12 @@ export interface IngestionReport {
   failedSources: number;
   sources: SourceScanResult[];
   samples: IngestionSample[];
+  /**
+   * Write failures that were previously only `console.warn`-ed, which let a run report
+   * thousands of new jobs while persisting none of them. A scheduled run cannot read the
+   * server console, so these have to travel in the response.
+   */
+  persistenceErrors: string[];
   jobs?: CollectedJob[];
 }
 
@@ -144,7 +150,8 @@ async function loadMonitoredCompanies(
 async function resolveCompanyIds(
   supabase: SupabaseClient,
   companies: MonitoredCompany[],
-  persist: boolean
+  persist: boolean,
+  errors: string[]
 ): Promise<void> {
   if (!persist) return;
 
@@ -153,16 +160,16 @@ async function resolveCompanyIds(
 
     const { data, error } = await supabase
       .from('companies')
-      .upsert([toCompanyRow(company as unknown as DefaultCompanyLike)], {
+      .upsert([companyRow(company)], {
         onConflict: 'ats_type,ats_identifier',
       })
       .select('id')
       .single();
 
     if (error || !data) {
-      console.warn(
-        `[ingestion] could not register company ${company.companyName}: ${error?.message ?? 'unknown error'}`
-      );
+      const reason = error?.message ?? 'no row returned';
+      errors.push(`company ${company.companyName}: ${reason}`);
+      console.warn(`[ingestion] could not register company ${company.companyName}: ${reason}`);
       continue;
     }
 
@@ -170,18 +177,31 @@ async function resolveCompanyIds(
   }
 }
 
-type DefaultCompanyLike = {
-  name: string;
-  website: string;
-  careersUrl: string;
-  atsType: AtsType;
-  atsIdentifier: string;
-};
+/**
+ * Build the `companies` row from a MonitoredCompany.
+ *
+ * This used to cast MonitoredCompany to DefaultCompany and call `toCompanyRow`, which read
+ * `.name`. MonitoredCompany has no `name` field, so every insert sent `name: null`, tripped the
+ * NOT NULL constraint, and was discarded by a swallowed `console.warn` — the run then reported
+ * thousands of new jobs while persisting nothing.
+ */
+function companyRow(company: MonitoredCompany): Record<string, Json> {
+  return {
+    name: company.companyName,
+    website: null,
+    careers_url: company.sourceUrl,
+    ats_type: company.atsType,
+    ats_identifier: company.atsIdentifier,
+    active: true,
+    updated_at: new Date().toISOString(),
+  };
+}
 
 async function ensureSource(
   supabase: SupabaseClient,
   company: MonitoredCompany,
-  sourceUrl: string
+  sourceUrl: string,
+  errors: string[]
 ): Promise<void> {
   const { data, error } = await supabase
     .from('sources')
@@ -201,11 +221,13 @@ async function ensureSource(
     .single();
 
   if (error) {
+    errors.push(`source ${company.companyName}: ${error.message}`);
     console.warn(`[ingestion] could not upsert source for ${company.companyName}: ${error.message}`);
     return;
   }
 
   if (data?.id) company.sourceId = String(data.id);
+  else errors.push(`source ${company.companyName}: upsert returned no id`);
 }
 
 interface ExistingJobRow {
@@ -280,7 +302,8 @@ async function persistJobs(
   supabase: SupabaseClient,
   company: MonitoredCompany,
   jobs: NormalizedJob[],
-  now: string
+  now: string,
+  errors: string[]
 ): Promise<PersistOutcome> {
   if (jobs.length === 0) return { inserted: 0, updated: 0, skippedDuplicates: 0 };
 
@@ -323,21 +346,41 @@ async function persistJobs(
     inserts.push(row);
   }
 
+  // `count: 'exact'` asks PostgREST how many rows it actually wrote. Without it the report can
+  // only echo the size of the batch, which is how a run claimed 2076 new jobs while storing
+  // none of them.
+  let insertedCount = 0;
+  let updatedCount = 0;
+
   if (inserts.length > 0) {
     for (const batch of chunk(inserts, BATCH_SIZE)) {
-      const { error } = await supabase
+      const { error, count } = await supabase
         .from('jobs')
-        .upsert(batch, { onConflict: 'company_id,external_id', ignoreDuplicates: true });
-      if (error) console.warn(`[ingestion] job insert failed: ${error.message}`);
+        .upsert(batch, {
+          onConflict: 'company_id,external_id',
+          ignoreDuplicates: true,
+          count: 'exact',
+        });
+      if (error) {
+        errors.push(`jobs insert (${company.companyName}): ${error.message}`);
+        console.warn(`[ingestion] job insert failed: ${error.message}`);
+      } else {
+        insertedCount += count ?? batch.length;
+      }
     }
   }
 
   if (updates.length > 0) {
     for (const batch of chunk(updates, BATCH_SIZE)) {
-      const { error } = await supabase
+      const { error, count } = await supabase
         .from('jobs')
-        .upsert(batch, { onConflict: 'company_id,external_id' });
-      if (error) console.warn(`[ingestion] job update failed: ${error.message}`);
+        .upsert(batch, { onConflict: 'company_id,external_id', count: 'exact' });
+      if (error) {
+        errors.push(`jobs update (${company.companyName}): ${error.message}`);
+        console.warn(`[ingestion] job update failed: ${error.message}`);
+      } else {
+        updatedCount += count ?? batch.length;
+      }
     }
   }
 
@@ -353,8 +396,8 @@ async function persistJobs(
   }
 
   return {
-    inserted: inserts.length,
-    updated: updates.length,
+    inserted: insertedCount,
+    updated: updatedCount,
     skippedDuplicates,
   };
 }
@@ -362,7 +405,8 @@ async function persistJobs(
 async function recordScanLog(
   supabase: SupabaseClient,
   company: MonitoredCompany,
-  result: SourceScanResult
+  result: SourceScanResult,
+  errors: string[]
 ): Promise<void> {
   if (!company.sourceId) return;
 
@@ -380,13 +424,17 @@ async function recordScanLog(
   if (result.status === 'skipped') return;
 
   const { error } = await supabase.from('scan_logs').insert(row);
-  if (error) console.warn(`[ingestion] scan log insert failed: ${error.message}`);
+  if (error) {
+    errors.push(`scan log (${company.companyName}): ${error.message}`);
+    console.warn(`[ingestion] scan log insert failed: ${error.message}`);
+  }
 }
 
 async function updateSourceState(
   supabase: SupabaseClient,
   company: MonitoredCompany,
-  result: SourceScanResult
+  result: SourceScanResult,
+  errors: string[]
 ): Promise<void> {
   if (!company.sourceId) return;
 
@@ -399,7 +447,10 @@ async function updateSourceState(
     })
     .eq('id', company.sourceId);
 
-  if (error) console.warn(`[ingestion] source state update failed: ${error.message}`);
+  if (error) {
+    errors.push(`source state (${company.companyName}): ${error.message}`);
+    console.warn(`[ingestion] source state update failed: ${error.message}`);
+  }
 }
 
 export async function runIngestion(
@@ -430,7 +481,9 @@ export async function runIngestion(
     companies = companies.slice(0, options.maxCompanies);
   }
 
-  if (supabase) await resolveCompanyIds(supabase, companies, true);
+  const persistenceErrors: string[] = [];
+
+  if (supabase) await resolveCompanyIds(supabase, companies, true, persistenceErrors);
 
   const results: SourceScanResult[] = [];
   const samples: IngestionSample[] = [];
@@ -474,8 +527,14 @@ export async function runIngestion(
       let duplicatesSkipped = deduped.duplicateCount;
 
       if (supabase) {
-        await ensureSource(supabase, company, sourceUrl);
-        const outcome = await persistJobs(supabase, company, deduped.unique.map((entry) => entry.job), now);
+        await ensureSource(supabase, company, sourceUrl, persistenceErrors);
+        const outcome = await persistJobs(
+          supabase,
+          company,
+          deduped.unique.map((entry) => entry.job),
+          now,
+          persistenceErrors
+        );
         inserted = outcome.inserted;
         updated = outcome.updated;
         duplicatesSkipped += outcome.skippedDuplicates;
@@ -498,8 +557,8 @@ export async function runIngestion(
       results.push(result);
 
       if (supabase) {
-        await recordScanLog(supabase, company, result);
-        await updateSourceState(supabase, company, result);
+        await recordScanLog(supabase, company, result, persistenceErrors);
+        await updateSourceState(supabase, company, result, persistenceErrors);
       }
 
       for (const entry of deduped.unique) {
@@ -544,8 +603,8 @@ export async function runIngestion(
       results.push(result);
 
       if (supabase) {
-        await recordScanLog(supabase, company, result);
-        await updateSourceState(supabase, company, result);
+        await recordScanLog(supabase, company, result, persistenceErrors);
+        await updateSourceState(supabase, company, result, persistenceErrors);
       }
     }
 
@@ -564,6 +623,7 @@ export async function runIngestion(
     failedSources: results.filter((result) => result.status !== 'completed').length,
     sources: results,
     samples,
+    persistenceErrors,
     ...(options.collectJobs ? { jobs: collected } : {}),
   };
 }
