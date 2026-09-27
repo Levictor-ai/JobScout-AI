@@ -34,17 +34,23 @@ Apply
 
 ## Current MVP
 
-* Company monitoring
-* Job collection
-* Greenhouse
-* Lever
-* Ashby
-* Job database
-* AI classification
-* AI matching
-* Dashboard
-* Saved jobs
-* Application tracking
+Implemented:
+
+* Company monitoring (Greenhouse + Ashby public boards)
+* Job collection, normalisation, cross-source dedupe
+* Job database with row level security
+* AI classification and skill extraction
+* AI profile matching with explainable scores
+* Dashboard, Discover, Saved jobs, Applications, Companies, Profile, Settings
+* Telegram high-match alerts
+
+Not built yet: email/password authentication. The app resolves a single viewer from the
+`profiles` table (or `SUPABASE_USER_ID`), so the RLS policies in the initial migration are
+not yet exercised by a real session.
+
+Lever is intentionally absent: its public `api.lever.co/v0/postings/*` endpoints answer 404
+for every board tested, and the authenticated `v1` endpoints need an account key. See
+`API_SOURCES.md`.
 
 ## Tech Stack
 
@@ -127,3 +133,57 @@ curl -X POST http://localhost:3000/api/notifications/telegram \
 
 The digest only reports roles that already have a `job_matches` score at or above
 the threshold, and skips anything already recorded in `notification_log`.
+
+---
+
+## AI analysis and matching
+
+`POST /api/analyze` classifies stored roles and scores them against the profile.
+
+`GET /api/analyze` reports the configured model and which credentials are present.
+
+```bash
+# Show the exact messages that would be sent, without calling OpenAI
+curl -X POST http://localhost:3000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"inspectPrompts":true,"limit":3,"maxCompanies":2}'
+
+# Score stored jobs and write job_skills + job_matches (needs OPENAI_API_KEY)
+curl -X POST http://localhost:3000/api/analyze \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"run","limit":5,"concurrency":2,"postedWithinDays":30}'
+```
+
+Modes:
+
+* `inspectPrompts` builds the prompts from live board data and returns them. No OpenAI call.
+* `preview` fetches live board data and runs the model without writing to the database.
+* `run` reads stored jobs, runs the model, and persists skills and matches.
+
+`pendingOnly` (default `true`, DB mode only) skips jobs that already have a match newer than
+the job row, so repeated runs do not pay to re-score unchanged postings.
+
+Job descriptions are untrusted input. They are isolated inside XML-ish tags, explicitly
+labelled as data, and the system prompt forbids obeying any instruction found inside them.
+Everything the model returns is a strict JSON schema; scores are estimates for a human
+decision, never a hiring prediction.
+
+---
+
+## The app
+
+| Route | Purpose |
+| --- | --- |
+| `/` | Ranked feed with stats, filters and the match breakdown modal |
+| `/discover` | Every stored role, including roles AI scoring has not reached |
+| `/saved` | Bookmarked roles |
+| `/applications` | Pipeline tracking with per-application notes |
+| `/companies` | Monitored boards, add/pause, last scan status |
+| `/profile` | The exact profile context sent to the matching model |
+| `/settings` | Run ingestion, analysis and the Telegram digest; credential status |
+
+The app runs without Supabase by falling back to the seed data in `src/data/seed-data.ts`
+and says so in the top bar. Saving, application tracking and company management need
+Supabase and report a clear reason instead of failing silently.
+

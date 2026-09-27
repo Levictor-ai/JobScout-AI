@@ -49,7 +49,7 @@ interface ChatMessage {
   content: string;
 }
 
-interface AiCallOptions<T> {
+interface AiCallOptions {
   schemaName: string;
   schema: Record<string, unknown>;
   messages: ChatMessage[];
@@ -70,7 +70,7 @@ interface ChatCompletionResponse {
   error?: { message?: string; type?: string; code?: string };
 }
 
-export async function requestStructuredJson<T>(options: AiCallOptions<T>): Promise<AiResult<T>> {
+export async function requestStructuredJson<T>(options: AiCallOptions): Promise<AiResult<T>> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new AiError('OPENAI_API_KEY is not configured.');
 

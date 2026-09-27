@@ -129,3 +129,23 @@ Below 60:
 Low alignment
 
 These categories are informational filters, not guarantees of hiring success.
+
+---
+
+## Implemented Behaviour
+
+* Two model calls per role. One classifies and extracts skills from the posting; one scores the
+  classified role against the profile and explains the score. Both are strict JSON schema
+  calls with `temperature: 0`.
+* Candidate screening happens before the model. Roles are filtered by posted date, target
+  role/seniority, and `remote_only`, so tokens are not spent on roles that cannot match.
+* `job_matches` is upserted on `(job_id, profile_id)`, so re-scoring a role replaces the
+  previous verdict instead of accumulating history.
+* `pendingOnly` (default `true` in `run` mode) skips any job whose newest match is at least
+  as recent as the job row. The job row's `updated_at` changes on every re-ingest, so a
+  reposted or edited description is re-scored automatically while untouched roles are not.
+* The UI never shows a bare percentage. The score bar is always accompanied by
+  `matching_factors`, `skill_gaps`, any `concerns`, the summary, and the model name and
+  timestamp. Roles with no stored match show no score at all rather than a guess.
+* Match scores gate the Telegram digest through a threshold; they never trigger an
+  application.

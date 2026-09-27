@@ -42,20 +42,24 @@ function decodeEntities(input: string): string {
   });
 }
 
-/**
- * Converts ATS HTML descriptions into readable plain text without adding a dependency.
- * Remote content is untrusted input: it is treated as text only, never rendered as markup.
- */
-export function htmlToText(html: string | null | undefined): string {
-  if (!html) return '';
-
-  const withoutNoise = html.replace(REMOVED, ' ');
-  const withBreaks = withoutNoise
+function stripTags(input: string): string {
+  return input
+    .replace(REMOVED, ' ')
     .replace(BREAK, '\n')
     .replace(BLOCK_BOUNDARY, '\n')
     .replace(TAGS, ' ');
+}
 
-  return decodeEntities(withBreaks)
+function looksLikeMarkup(input: string): boolean {
+  return /<[a-z!/][^>]*>/i.test(input);
+}
+
+function looksEscaped(input: string): boolean {
+  return /&(amp|lt|gt|quot|apos|nbsp|#\d+|#x[0-9a-f]+);/i.test(input);
+}
+
+function tidy(input: string): string {
+  return input
     .replace(/\r/g, '')
     .replace(/[ \t\f\v]+/g, ' ')
     .replace(/ *\n */g, '\n')
@@ -64,6 +68,27 @@ export function htmlToText(html: string | null | undefined): string {
     .map((line) => line.trim())
     .join('\n')
     .trim();
+}
+
+/**
+ * Converts ATS HTML descriptions into readable plain text without adding a dependency.
+ * Boards are inconsistent: some return raw markup, others (Figma on Greenhouse) return
+ * escaped markup, so decode and strip repeat until neither tags nor entities remain.
+ * Remote content is untrusted input: it is treated as text only, never rendered as markup.
+ */
+export function htmlToText(html: string | null | undefined): string {
+  if (!html) return '';
+
+  let working = decodeEntities(html);
+  let stripped = stripTags(working);
+
+  for (let pass = 0; pass < 3; pass += 1) {
+    if (!looksLikeMarkup(stripped) && !looksEscaped(stripped)) return tidy(stripped);
+    working = decodeEntities(stripTags(working));
+    stripped = stripTags(working);
+  }
+
+  return tidy(stripped);
 }
 
 export function truncateText(text: string, maxLength: number): string {

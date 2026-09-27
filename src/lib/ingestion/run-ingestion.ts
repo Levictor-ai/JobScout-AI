@@ -511,19 +511,20 @@ export async function runIngestion(
           });
         }
 
-        if (samples.length >= sampleLimit) break;
-        samples.push({
-          company: company.companyName,
-          title: entry.job.title,
-          location: entry.job.location,
-          remoteStatus: entry.job.remoteStatus,
-          employmentType: entry.job.employmentType,
-          seniority: entry.job.seniority,
-          roleCategory: entry.job.roleCategory,
-          postedAt: entry.job.postedAt,
-          applicationUrl: entry.job.applicationUrl,
-          descriptionLength: entry.job.description.length,
-        });
+        if (sampleLimit > 0 && samples.length < sampleLimit) {
+          samples.push({
+            company: company.companyName,
+            title: entry.job.title,
+            location: entry.job.location,
+            remoteStatus: entry.job.remoteStatus,
+            employmentType: entry.job.employmentType,
+            seniority: entry.job.seniority,
+            roleCategory: entry.job.roleCategory,
+            postedAt: entry.job.postedAt,
+            applicationUrl: entry.job.applicationUrl,
+            descriptionLength: entry.job.description.length,
+          });
+        }
       }
     } catch (error) {
       const result: SourceScanResult = {
