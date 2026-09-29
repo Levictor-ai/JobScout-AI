@@ -8,6 +8,9 @@ on:
     - cron: '17 * * * *'
   workflow_dispatch:
 
+# This job only calls an external URL, so it needs no repository access. Grant none.
+permissions: {}
+
 # Never let two digests overlap, or the same posting can be sent twice before either run has
 # recorded it.
 concurrency:
@@ -27,23 +30,40 @@ jobs:
         run: |
           set -euo pipefail
 
+          # `:-` on both. `set -u` aborts on an unset variable, so a bare `${CRON_SECRET}` would
+          # kill the script with "unbound variable" before the `-z` test below could report it.
+          # GitHub substitutes an empty string for a missing secret today, but depending on that
+          # turns a clear message into an unbound-variable trace.
           url="${DIGEST_URL:-https://job-scout-ai-rho.vercel.app/api/cron/digest}"
 
-          if [ -z "${CRON_SECRET}" ]; then
+          if [ -z "${CRON_SECRET:-}" ]; then
             echo "CRON_SECRET is not set. Add it under Settings > Secrets and variables > Actions."
             exit 1
           fi
 
-          status=$(curl -sS -o response.json -w '%{http_code}' \
+          # The route caps itself at 300s (maxDuration), so cap curl just past that: a slow
+          # request then fails here with curl's own error rather than sitting until the job is
+          # killed at 10 minutes with no output. The `|| status=000` keeps a connection-level
+          # failure (DNS, TLS, timeout) from tripping `set -e` before the report below.
+          status=$(curl -sS -o response.json -w '%{http_code}' --max-time 330 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${url}")
+            "${url}") || status="000"
 
           echo "HTTP ${status}"
           echo '--- response ---'
-          cat response.json
+          cat response.json 2>/dev/null || echo '(no response body)'
           echo
 
           if [ "${status}" != "200" ]; then
             echo "Digest run failed with HTTP ${status}."
+
+            # A 401 is the failure that is hardest to read, because both sides look configured:
+            # the secret is set, so the guard above passes, and the route is healthy, so the
+            # deployment looks fine. It almost always means the two sides hold different values.
+            if [ "${status}" = "401" ]; then
+              echo "401 means this CRON_SECRET does not match CRON_SECRET on the Vercel deployment."
+              echo "Both must hold the same value. Copy one from the other, don't generate a new one."
+            fi
+
             exit 1
           fi
