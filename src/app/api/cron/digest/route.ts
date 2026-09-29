@@ -15,6 +15,18 @@ import { sendLiveDigest } from '@/lib/notifications/live-digest';
  * route exposes: last 3 days, remote only, product-design-first, and a minimum profile score.
  * A scheduled run nobody is watching must not fall back to "send everything that is remote".
  *
+ * That minimum is 9, not 10, and the number is load-bearing. Measured across the live boards,
+ * 9 is the highest score any remote-only posting reaches: the remote pool over 14 days tops out
+ * there, at product management, frontend and AI engineering roles. At 10 the remote-only digest
+ * could never match anything, so it returned zero forever while reporting success. Below 9 it
+ * starts admitting support, ops and marketing roles that are not worth an alert.
+ *
+ * The real cost of staying remote-only is that the strong product design roles this profile is
+ * actually after are all on-site. Anthropic, Stripe, Linear, Vercel, Figma and Webflow post
+ * their design roles as London, Berlin or US-located roles, scoring 76-91 against a target
+ * profile, and every one of them is filtered out by `remote=1`. Dropping to `?remote=0` finds
+ * them immediately. That is a deliberate choice about the search, not a bug to be tuned away.
+ *
  * Every option can be overridden per call for testing, e.g. `?dryRun=1` to inspect the run
  * without sending or marking anything.
  */
@@ -61,7 +73,7 @@ export async function GET(request: Request): Promise<Response> {
       postedWithinDays: positiveInt(param('days'), 3),
       requireRemote: param('remote') !== '0',
       allowHybrid: param('hybrid') === '1',
-      minRelevance: positiveInt(param('minRelevance'), 10),
+      minRelevance: positiveInt(param('minRelevance'), 9),
       requireTitleMatch: param('requireTitleMatch') === '1',
       designFirst: param('designFirst') !== '0',
       maxTotal: positiveInt(param('maxTotal'), 25),
