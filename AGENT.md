@@ -1,4 +1,4 @@
-﻿# JobScout AI Agent Instructions
+# JobScout AI Agent Instructions
 
 ## Role
 
